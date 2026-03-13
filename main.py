@@ -46,7 +46,7 @@ async def load_model():
         pipeline = QwenImageEditPlusPipeline.from_pretrained(
             model_id,
             torch_dtype=torch.float16,
-            device_map="balanced",
+            device_map="auto",
         )
         
         pipeline = pipeline.to("cuda")
