@@ -67,7 +67,7 @@ async def load_model():
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
             gpu_mem_used = torch.cuda.memory_allocated() / 1024**3
-            gpu_mem_total = torch.cuda.get_device_properties(0).total_mem / 1024**3
+            gpu_mem_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
             logger.info(f"🎮 GPU: {gpu_name}")
             logger.info(f"💾 VRAM: {gpu_mem_used:.2f}GB / {gpu_mem_total:.2f}GB")
 
