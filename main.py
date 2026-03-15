@@ -35,24 +35,25 @@ class EditResponse(BaseModel):
 async def load_model():
     global pipeline
 
-    logger.info("🚀 Iniciando carga de Qwen-Image-Edit-2509...")
+    logger.info("🚀 Iniciando carga de Qwen-Image-Edit-2509 (NF4 4-bit)...")
     start = time.time()
 
     try:
         from diffusers import QwenImageEditPlusPipeline
 
-        model_id = "Qwen/Qwen-Image-Edit-2509"
+        # Modelo pre-cuantizado NF4 — solo ~12GB en VRAM
+        # Ref: https://huggingface.co/ovedrive/Qwen-Image-Edit-2509-4bit
+        model_id = "ovedrive/Qwen-Image-Edit-2509-4bit"
 
-        logger.info("📥 Descargando modelo...")
+        logger.info("📥 Descargando modelo cuantizado NF4...")
         pipeline = QwenImageEditPlusPipeline.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
         )
 
-        # model_cpu_offload: mantiene en CPU, mueve a GPU por componente.
-        # Más rápido que sequential, y no intenta meter todo en VRAM de golpe.
-        logger.info("⚙️ Configurando model CPU offload...")
-        pipeline.enable_model_cpu_offload()
+        # Con NF4 el modelo pesa ~12GB — entra de sobra en 24GB con .to("cuda")
+        logger.info("⚙️ Cargando modelo en GPU...")
+        pipeline.to("cuda")
         pipeline.enable_attention_slicing(1)
 
         load_time = time.time() - start
@@ -61,7 +62,9 @@ async def load_model():
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
             gpu_mem_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            gpu_mem_used = torch.cuda.memory_allocated() / 1024**3
             logger.info(f"🎮 GPU: {gpu_name} ({gpu_mem_total:.1f}GB)")
+            logger.info(f"💾 VRAM usada: {gpu_mem_used:.1f}GB / {gpu_mem_total:.1f}GB")
 
     except Exception as e:
         logger.error(f"❌ Error al cargar modelo: {e}")
@@ -71,7 +74,7 @@ async def load_model():
 @app.get("/")
 def root():
     return {
-        "service": "Qwen-Image-Edit-2509 API",
+        "service": "Qwen-Image-Edit-2509 API (NF4 4-bit)",
         "status": "ready" if pipeline is not None else "loading",
     }
 
@@ -105,11 +108,9 @@ async def edit_image(req: EditRequest):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Imagen inválida: {str(e)}")
 
-        generator = torch.Generator(device="cpu").manual_seed(req.seed)
+        generator = torch.Generator(device="cuda").manual_seed(req.seed)
 
         logger.info(f"   Steps: {req.num_inference_steps}, true_cfg: {req.true_cfg_scale}")
-
-        torch.cuda.empty_cache()
 
         with torch.inference_mode():
             output = pipeline(
@@ -133,8 +134,6 @@ async def edit_image(req: EditRequest):
 
         logger.info(f"✅ Listo en {process_time:.2f}s | VRAM: {gpu_mem:.2f}GB")
 
-        torch.cuda.empty_cache()
-
         return EditResponse(
             image=result_b64,
             processing_time=process_time,
@@ -145,7 +144,6 @@ async def edit_image(req: EditRequest):
         raise
     except Exception as e:
         logger.error(f"❌ Error: {e}")
-        torch.cuda.empty_cache()
         raise HTTPException(status_code=500, detail=str(e))
 
 
