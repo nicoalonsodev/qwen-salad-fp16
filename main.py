@@ -2,10 +2,6 @@ import os
 import io
 import base64
 import time
-
-# Configurar antes de importar torch
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
 import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -47,17 +43,15 @@ async def load_model():
 
         model_id = "Qwen/Qwen-Image-Edit-2509"
 
-        logger.info("📥 Descargando modelo (puede tardar varios minutos la primera vez)...")
+        logger.info("📥 Descargando modelo...")
         pipeline = QwenImageEditPlusPipeline.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
         )
 
-        # sequential_cpu_offload es más agresivo que model_cpu_offload:
-        # mueve cada capa individual a GPU solo cuando se usa.
-        # Necesario para true_cfg_scale en 24GB.
-        logger.info("⚙️ Configurando sequential CPU offload para 24GB VRAM...")
-        pipeline.enable_sequential_cpu_offload()
+        # A40 tiene 48GB — sobra espacio para cargar todo en GPU
+        logger.info("⚙️ Cargando modelo en GPU...")
+        pipeline.to("cuda")
         pipeline.enable_attention_slicing(1)
 
         load_time = time.time() - start
@@ -66,7 +60,9 @@ async def load_model():
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
             gpu_mem_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            gpu_mem_used = torch.cuda.memory_allocated() / 1024**3
             logger.info(f"🎮 GPU: {gpu_name} ({gpu_mem_total:.1f}GB)")
+            logger.info(f"💾 VRAM usada: {gpu_mem_used:.1f}GB")
 
     except Exception as e:
         logger.error(f"❌ Error al cargar modelo: {e}")
@@ -110,12 +106,9 @@ async def edit_image(req: EditRequest):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Imagen inválida: {str(e)}")
 
-        generator = torch.Generator(device="cpu").manual_seed(req.seed)
+        generator = torch.Generator(device="cuda").manual_seed(req.seed)
 
         logger.info(f"   Steps: {req.num_inference_steps}, true_cfg: {req.true_cfg_scale}")
-
-        # Limpiar cache de CUDA antes de cada inferencia
-        torch.cuda.empty_cache()
 
         with torch.inference_mode():
             output = pipeline(
@@ -139,9 +132,6 @@ async def edit_image(req: EditRequest):
 
         logger.info(f"✅ Listo en {process_time:.2f}s | VRAM: {gpu_mem:.2f}GB")
 
-        # Limpiar después también
-        torch.cuda.empty_cache()
-
         return EditResponse(
             image=result_b64,
             processing_time=process_time,
@@ -152,7 +142,6 @@ async def edit_image(req: EditRequest):
         raise
     except Exception as e:
         logger.error(f"❌ Error: {e}")
-        torch.cuda.empty_cache()
         raise HTTPException(status_code=500, detail=str(e))
 
 
