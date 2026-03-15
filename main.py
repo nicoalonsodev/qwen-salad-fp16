@@ -49,9 +49,10 @@ async def load_model():
             torch_dtype=torch.bfloat16,
         )
 
-        # A40 tiene 48GB — sobra espacio para cargar todo en GPU
-        logger.info("⚙️ Cargando modelo en GPU...")
-        pipeline.to("cuda")
+        # model_cpu_offload: mantiene en CPU, mueve a GPU por componente.
+        # Más rápido que sequential, y no intenta meter todo en VRAM de golpe.
+        logger.info("⚙️ Configurando model CPU offload...")
+        pipeline.enable_model_cpu_offload()
         pipeline.enable_attention_slicing(1)
 
         load_time = time.time() - start
@@ -60,9 +61,7 @@ async def load_model():
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
             gpu_mem_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
-            gpu_mem_used = torch.cuda.memory_allocated() / 1024**3
             logger.info(f"🎮 GPU: {gpu_name} ({gpu_mem_total:.1f}GB)")
-            logger.info(f"💾 VRAM usada: {gpu_mem_used:.1f}GB")
 
     except Exception as e:
         logger.error(f"❌ Error al cargar modelo: {e}")
@@ -106,9 +105,11 @@ async def edit_image(req: EditRequest):
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Imagen inválida: {str(e)}")
 
-        generator = torch.Generator(device="cuda").manual_seed(req.seed)
+        generator = torch.Generator(device="cpu").manual_seed(req.seed)
 
         logger.info(f"   Steps: {req.num_inference_steps}, true_cfg: {req.true_cfg_scale}")
+
+        torch.cuda.empty_cache()
 
         with torch.inference_mode():
             output = pipeline(
@@ -132,6 +133,8 @@ async def edit_image(req: EditRequest):
 
         logger.info(f"✅ Listo en {process_time:.2f}s | VRAM: {gpu_mem:.2f}GB")
 
+        torch.cuda.empty_cache()
+
         return EditResponse(
             image=result_b64,
             processing_time=process_time,
@@ -142,6 +145,7 @@ async def edit_image(req: EditRequest):
         raise
     except Exception as e:
         logger.error(f"❌ Error: {e}")
+        torch.cuda.empty_cache()
         raise HTTPException(status_code=500, detail=str(e))
 
 
