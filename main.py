@@ -81,12 +81,13 @@ async def load_model():
         pipeline.to("cuda")
         pipeline.enable_attention_slicing(1)
 
-pipeline.transformer = torch.compile(
-    pipeline.transformer,
-    mode="reduce-overhead",
-    fullgraph=True
-)
-        
+        logger.info("⚡ Compilando transformer con torch.compile (primera request será lenta)...")
+        pipeline.transformer = torch.compile(
+            pipeline.transformer,
+            mode="reduce-overhead",
+            fullgraph=True,
+        )
+
         load_time = time.time() - start
         logger.info(f"✅ Modelo listo en {load_time:.1f}s")
 
@@ -98,7 +99,6 @@ pipeline.transformer = torch.compile(
             logger.info(f"💾 VRAM usada: {gpu_mem_used:.1f}GB / {gpu_mem_total:.1f}GB")
 
     except Exception as e:
-        # No hacer raise — dejamos el container vivo para poder leer los logs en RunPod
         logger.error(f"❌ Error al cargar modelo: {e}")
         logger.error("⚠️  El servidor quedará activo pero /health devolverá 503")
         pipeline = None
@@ -159,8 +159,8 @@ async def edit_image(req: EditRequest):
                 true_cfg_scale=req.true_cfg_scale,
                 guidance_scale=req.guidance_scale,
                 generator=generator,
-                   height=768, 
-                  width=768,  
+                height=768,
+                width=768,
             )
 
         result_image = output.images[0]
