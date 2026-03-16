@@ -1,7 +1,7 @@
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+FROM runpod/pytorch:2.6.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 WORKDIR /app
- 
+
 RUN apt-get update && apt-get install -y \
     git libgl1-mesa-glx libglib2.0-0 gcc \
     && rm -rf /var/lib/apt/lists/*
