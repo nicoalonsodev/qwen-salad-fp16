@@ -12,8 +12,11 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Qwen Image Edit 2509 API")
+app = FastAPI(title="Qwen Image Edit 2511 API")
 pipeline = None
+
+# Resolución máxima que procesa el modelo (balance VRAM/calidad)
+MODEL_MAX_SIZE = 768
 
 
 class EditRequest(BaseModel):
@@ -40,25 +43,42 @@ def decode_image(img_b64: str) -> Image.Image:
     return Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
 
+def resize_for_model(img: Image.Image, max_size: int = MODEL_MAX_SIZE) -> Image.Image:
+    """Redimensiona al max_size manteniendo aspect ratio. Múltiplos de 8."""
+    w, h = img.size
+    if max(w, h) <= max_size:
+        # Igual aseguramos múltiplos de 8
+        new_w = (w // 8) * 8
+        new_h = (h // 8) * 8
+        if new_w == w and new_h == h:
+            return img
+        return img.resize((new_w, new_h), Image.LANCZOS)
+    ratio = max_size / max(w, h)
+    new_w = (int(w * ratio) // 8) * 8
+    new_h = (int(h * ratio) // 8) * 8
+    logger.info(f"   Resize: {w}x{h} → {new_w}x{new_h}")
+    return img.resize((new_w, new_h), Image.LANCZOS)
+
+
 @app.on_event("startup")
 async def load_model():
     global pipeline
 
-    logger.info("🚀 Iniciando carga de Qwen-Image-Edit-2509 (NF4 4-bit)...")
+    logger.info("🚀 Iniciando carga de Qwen-Image-Edit-2511 (full precision)...")
     start = time.time()
 
     try:
         from diffusers import QwenImageEditPlusPipeline
 
-        model_id = "ovedrive/Qwen-Image-Edit-2511-4bit"
+        model_id = "Qwen/Qwen-Image-Edit-2511"
 
-        logger.info("📥 Descargando modelo cuantizado NF4...")
+        logger.info("📥 Descargando modelo...")
         pipeline = QwenImageEditPlusPipeline.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
         )
 
-        logger.info("⚙️ Cargando modelo en GPU...")
+        logger.info("⚙️ Cargando modelo en GPU (sin offload)...")
         pipeline.to("cuda")
         pipeline.enable_attention_slicing(1)
 
@@ -80,7 +100,7 @@ async def load_model():
 @app.get("/")
 def root():
     return {
-        "service": "Qwen-Image-Edit-2509 API (NF4 4-bit)",
+        "service": "Qwen-Image-Edit-2511 API (full precision)",
         "status": "ready" if pipeline is not None else "loading",
     }
 
@@ -107,11 +127,16 @@ async def edit_image(req: EditRequest):
         # Decodificar imagen(es)
         try:
             if isinstance(req.image, list):
-                images = [decode_image(img) for img in req.image]
-                logger.info(f"   {len(images)} imágenes: {[img.size for img in images]}")
+                images_original = [decode_image(img) for img in req.image]
+                logger.info(f"   {len(images_original)} imágenes: {[img.size for img in images_original]}")
+                # Guardar tamaño original de la primera imagen para upscale final
+                original_size = images_original[0].size
+                images = [resize_for_model(img) for img in images_original]
             else:
-                images = decode_image(req.image)
-                logger.info(f"   Tamaño: {images.size}")
+                image_original = decode_image(req.image)
+                original_size = image_original.size
+                logger.info(f"   Tamaño original: {original_size}")
+                images = resize_for_model(image_original)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Imagen inválida: {str(e)}")
 
@@ -131,6 +156,11 @@ async def edit_image(req: EditRequest):
             )
 
         result_image = output.images[0]
+
+        # Upscale al tamaño original del input
+        if result_image.size != original_size:
+            logger.info(f"   Upscale: {result_image.size} → {original_size}")
+            result_image = result_image.resize(original_size, Image.LANCZOS)
 
         buffer = io.BytesIO()
         result_image.save(buffer, format="PNG")
