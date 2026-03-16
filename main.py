@@ -6,6 +6,7 @@ import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from PIL import Image
+from typing import Union
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -16,10 +17,10 @@ pipeline = None
 
 
 class EditRequest(BaseModel):
-    image: str
+    image: Union[str, list[str]]  # Un base64 o lista de base64
     prompt: str
     negative_prompt: str = " "
-    num_inference_steps: int = 10  # El autor dice que funciona perfecto con 10
+    num_inference_steps: int = 10
     true_cfg_scale: float = 4.0
     guidance_scale: float = 1.0
     seed: int = 0
@@ -29,6 +30,14 @@ class EditResponse(BaseModel):
     image: str
     processing_time: float
     gpu_memory_gb: float
+
+
+def decode_image(img_b64: str) -> Image.Image:
+    """Decodifica un base64 a PIL Image, limpiando prefijo si existe."""
+    if "," in img_b64:
+        img_b64 = img_b64.split(",")[1]
+    img_bytes = base64.b64decode(img_b64)
+    return Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
 
 @app.on_event("startup")
@@ -49,8 +58,6 @@ async def load_model():
             torch_dtype=torch.bfloat16,
         )
 
-        # Con NF4 usa ~15.8GB — entra de sobra en 47GB
-        # .to("cuda") es más rápido que enable_model_cpu_offload()
         logger.info("⚙️ Cargando modelo en GPU...")
         pipeline.to("cuda")
         pipeline.enable_attention_slicing(1)
@@ -95,15 +102,16 @@ async def edit_image(req: EditRequest):
     start_time = time.time()
 
     try:
-        logger.info(f"📸 Procesando: '{req.prompt}'")
+        logger.info(f"📸 Procesando: '{req.prompt[:80]}...'")
 
+        # Decodificar imagen(es)
         try:
-            image_data = req.image
-            if "," in image_data:
-                image_data = image_data.split(",")[1]
-            img_bytes = base64.b64decode(image_data)
-            input_image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-            logger.info(f"   Tamaño: {input_image.size}")
+            if isinstance(req.image, list):
+                images = [decode_image(img) for img in req.image]
+                logger.info(f"   {len(images)} imágenes: {[img.size for img in images]}")
+            else:
+                images = decode_image(req.image)
+                logger.info(f"   Tamaño: {images.size}")
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Imagen inválida: {str(e)}")
 
@@ -113,7 +121,7 @@ async def edit_image(req: EditRequest):
 
         with torch.inference_mode():
             output = pipeline(
-                image=input_image,
+                image=images,
                 prompt=req.prompt,
                 negative_prompt=req.negative_prompt,
                 num_inference_steps=req.num_inference_steps,
