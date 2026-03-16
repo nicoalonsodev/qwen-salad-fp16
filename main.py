@@ -23,7 +23,7 @@ class EditRequest(BaseModel):
     image: Union[str, list[str]]  # Un base64 o lista de base64
     prompt: str
     negative_prompt: str = " "
-    num_inference_steps: int = 10
+    num_inference_steps: int = 25
     true_cfg_scale: float = 4.0
     guidance_scale: float = 1.0
     seed: int = 0
