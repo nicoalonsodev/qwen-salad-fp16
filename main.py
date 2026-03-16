@@ -81,6 +81,12 @@ async def load_model():
         pipeline.to("cuda")
         pipeline.enable_attention_slicing(1)
 
+pipeline.transformer = torch.compile(
+    pipeline.transformer,
+    mode="reduce-overhead",
+    fullgraph=True
+)
+        
         load_time = time.time() - start
         logger.info(f"✅ Modelo listo en {load_time:.1f}s")
 
@@ -153,6 +159,8 @@ async def edit_image(req: EditRequest):
                 true_cfg_scale=req.true_cfg_scale,
                 guidance_scale=req.guidance_scale,
                 generator=generator,
+                   height=768, 
+                  width=768,  
             )
 
         result_image = output.images[0]
