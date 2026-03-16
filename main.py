@@ -50,7 +50,7 @@ async def load_model():
     try:
         from diffusers import QwenImageEditPlusPipeline
 
-        model_id = "ovedrive/Qwen-Image-Edit-2509-4bit"
+        model_id = "ovedrive/Qwen-Image-Edit-2511-4bit"
 
         logger.info("📥 Descargando modelo cuantizado NF4...")
         pipeline = QwenImageEditPlusPipeline.from_pretrained(
