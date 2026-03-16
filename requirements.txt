@@ -1,17 +1,12 @@
-# PyTorch con CUDA 12.4
---extra-index-url https://download.pytorch.org/whl/cu124
-torch==2.6.0+cu124
-torchvision==0.21.0+cu124
-torchaudio==2.6.0+cu124
-
 # Diffusers — versión que incluye QwenImageEditPlusPipeline
+# torch/torchvision/torchaudio se instalan en el Dockerfile directamente
 git+https://github.com/huggingface/diffusers.git@v0.33.1
 
 # HuggingFace stack
 transformers>=4.49.0
 accelerate>=0.34.0
 huggingface_hub>=0.27.0
- 
+
 # API
 fastapi==0.115.0
 uvicorn[standard]==0.34.0
