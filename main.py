@@ -47,7 +47,6 @@ def resize_for_model(img: Image.Image, max_size: int = MODEL_MAX_SIZE) -> Image.
     """Redimensiona al max_size manteniendo aspect ratio. Múltiplos de 8."""
     w, h = img.size
     if max(w, h) <= max_size:
-        # Igual aseguramos múltiplos de 8
         new_w = (w // 8) * 8
         new_h = (h // 8) * 8
         if new_w == w and new_h == h:
@@ -64,8 +63,7 @@ def resize_for_model(img: Image.Image, max_size: int = MODEL_MAX_SIZE) -> Image.
 async def load_model():
     global pipeline
 
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-    logger.info("🚀 Iniciando carga de Qwen-Image-Edit-2511 (full precision)...")
+    logger.info("🚀 Iniciando carga de Qwen-Image-Edit-2511...")
     start = time.time()
 
     try:
@@ -73,13 +71,13 @@ async def load_model():
 
         model_id = "Qwen/Qwen-Image-Edit-2511"
 
-        logger.info("📥 Descargando modelo...")
+        logger.info("📥 Descargando modelo desde HuggingFace...")
         pipeline = QwenImageEditPlusPipeline.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
         )
 
-        logger.info("⚙️ Cargando modelo en GPU (sin offload)...")
+        logger.info("⚙️ Moviendo modelo a GPU...")
         pipeline.to("cuda")
         pipeline.enable_attention_slicing(1)
 
@@ -94,14 +92,16 @@ async def load_model():
             logger.info(f"💾 VRAM usada: {gpu_mem_used:.1f}GB / {gpu_mem_total:.1f}GB")
 
     except Exception as e:
+        # No hacer raise — dejamos el container vivo para poder leer los logs en RunPod
         logger.error(f"❌ Error al cargar modelo: {e}")
-        raise
+        logger.error("⚠️  El servidor quedará activo pero /health devolverá 503")
+        pipeline = None
 
 
 @app.get("/")
 def root():
     return {
-        "service": "Qwen-Image-Edit-2511 API (full precision)",
+        "service": "Qwen-Image-Edit-2511 API",
         "status": "ready" if pipeline is not None else "loading",
     }
 
@@ -109,7 +109,7 @@ def root():
 @app.get("/health")
 def health():
     if pipeline is None:
-        raise HTTPException(status_code=503, detail="Modelo aún cargando")
+        raise HTTPException(status_code=503, detail="Modelo aún cargando o falló al iniciar")
     return {"status": "healthy", "model_loaded": True}
 
 
@@ -130,7 +130,6 @@ async def edit_image(req: EditRequest):
             if isinstance(req.image, list):
                 images_original = [decode_image(img) for img in req.image]
                 logger.info(f"   {len(images_original)} imágenes: {[img.size for img in images_original]}")
-                # Guardar tamaño original de la primera imagen para upscale final
                 original_size = images_original[0].size
                 images = [resize_for_model(img) for img in images_original]
             else:
@@ -172,6 +171,9 @@ async def edit_image(req: EditRequest):
 
         logger.info(f"✅ Listo en {process_time:.2f}s | VRAM: {gpu_mem:.2f}GB")
 
+        # Liberar VRAM fragmentada entre requests
+        torch.cuda.empty_cache()
+
         return EditResponse(
             image=result_b64,
             processing_time=process_time,
@@ -181,7 +183,8 @@ async def edit_image(req: EditRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Error: {e}")
+        logger.error(f"❌ Error en inferencia: {e}")
+        torch.cuda.empty_cache()
         raise HTTPException(status_code=500, detail=str(e))
 
 
