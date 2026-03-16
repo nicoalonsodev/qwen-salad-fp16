@@ -85,7 +85,7 @@ async def load_model():
         pipeline.transformer = torch.compile(
             pipeline.transformer,
             mode="reduce-overhead",
-            fullgraph=True,
+            fullgraph=False,
         )
 
         load_time = time.time() - start
