@@ -26,8 +26,15 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Verificar que torchvision quedó instalado correctamente
-RUN python -c "import torchvision; print('torchvision OK:', torchvision.__version__)"
+# Reinstalar torchvision AL FINAL — por si requirements.txt lo sobreescribió
+RUN pip install --no-cache-dir \
+    torch==2.5.1 \
+    torchvision==0.20.1 \
+    torchaudio==2.5.1 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+# Verificar — si falla, el build falla (no llega una imagen rota a RunPod)
+RUN python -c "import torch; import torchvision; print('torch:', torch.__version__, '| torchvision:', torchvision.__version__, '| CUDA:', torch.version.cuda)"
 
 COPY main.py .
 
