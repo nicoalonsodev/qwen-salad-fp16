@@ -19,7 +19,7 @@ class EditRequest(BaseModel):
     image: str
     prompt: str
     negative_prompt: str = " "
-    num_inference_steps: int = 28
+    num_inference_steps: int = 10  # El autor dice que funciona perfecto con 10
     true_cfg_scale: float = 4.0
     guidance_scale: float = 1.0
     seed: int = 0
@@ -41,8 +41,6 @@ async def load_model():
     try:
         from diffusers import QwenImageEditPlusPipeline
 
-        # Modelo pre-cuantizado NF4 — solo ~12GB en VRAM
-        # Ref: https://huggingface.co/ovedrive/Qwen-Image-Edit-2509-4bit
         model_id = "ovedrive/Qwen-Image-Edit-2509-4bit"
 
         logger.info("📥 Descargando modelo cuantizado NF4...")
@@ -51,7 +49,8 @@ async def load_model():
             torch_dtype=torch.bfloat16,
         )
 
-        # Con NF4 el modelo pesa ~12GB — entra de sobra en 24GB con .to("cuda")
+        # Con NF4 usa ~15.8GB — entra de sobra en 47GB
+        # .to("cuda") es más rápido que enable_model_cpu_offload()
         logger.info("⚙️ Cargando modelo en GPU...")
         pipeline.to("cuda")
         pipeline.enable_attention_slicing(1)
