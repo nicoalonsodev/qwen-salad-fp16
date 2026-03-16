@@ -64,6 +64,7 @@ def resize_for_model(img: Image.Image, max_size: int = MODEL_MAX_SIZE) -> Image.
 async def load_model():
     global pipeline
 
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     logger.info("🚀 Iniciando carga de Qwen-Image-Edit-2511 (full precision)...")
     start = time.time()
 
